@@ -1,0 +1,759 @@
+load "PETSc"
+macro dimension()3// EOM
+macro trueRestrict()true// EOM
+macro removeZeros()true// EOM
+include "macro_ddm.idp"
+load "iovtk"
+load "msh3"
+load "medit"
+
+load "mshmet"
+load "mmg"
+
+//load macro for Neo-Hookean heperelasticity
+include "kinematics.idp"
+
+macro print(text)
+{
+	cout << text << endl;
+	cout.flush;
+} //
+
+int[int] Order = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1];
+int[int] OrderDeform = [0,0,0,0,1,1,1,1,1];
+int[int] OrderRefer = [0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1];
+int[int] OrderOne = [0,0,0,0,0,1,1,1,1];
+string DataName = "intensity volume_factor permeability coefficient pressure ux uy uz fx fy fz shear_rate shear_stress elongation_rate";
+string DataParameter = "intensity volume_factor permeability coefficient";
+string DataOne = "vf vfInitial VolumeStrain vfold vonMisesStress u1n u2n u3n unMagnitude";
+string DataDeform = "vonMisesStress vf permeability coefficient fx fy fz";
+string DataRefer = "vf vfInitial VolumeStrain vonMisesStress u1n u2n u3n unMagnitude u1nAssumpt u2nAssumpt u3nAssumpt fx fy fz undelta";
+
+macro div(u) (dx(u#x) + dy(u#y) + dz(u#z))//
+macro grad(u) [dx(u), dy(u), dz(u)]//
+macro Grad(u) [grad(u#x), grad(u#y), grad(u#z)]//
+macro UgradV(u,v) [ [u#x,u#y,u#z]'*[dx(v#x),dy(v#x),dz(v#x)] , 
+                    [u#x,u#y,u#z]'*[dx(v#y),dy(v#y),dz(v#y)] ,
+                    [u#x,u#y,u#z]'*[dx(v#z),dy(v#z),dz(v#z)] ]//
+
+func PkVector = [P2, P2, P2, P1];       // fluid
+func P2Vector = [P2, P2, P2];
+func Pk = [P1, P1, P1];                 // mechanic
+
+
+// Parameters
+real cpuTime;
+int Inlet = 3;
+int Outlet = 4;
+
+real rho = 0.997 * 1e-3; // Density of the blood (g mm^-3)
+real miu = 1.18e-3; // Dynamic viscosity (g mm^-1 s^-1)
+real nu = miu / rho; // (mm^2 s^-1)
+real dia = 2e-3; // Diameter of platelets (mm)
+real spher = 0.71; // Sphericity of platelets
+
+real umax = 100; // Max velocity  (mm/s)
+func uin = - umax * (z-0.05)^2 / 0.05^2 + umax;
+
+//-----------------------------------------------------------
+// Material parameters (isotropic elasticity)
+//-----------------------------------------------------------
+
+// Gradiant descent loop parameters
+real tol = 1e-4;
+real res = 2*tol;
+real vftol = 1e-2;
+
+// FSI parameters
+real rfactor1 = 1; // u1n
+real rfactor2 = 1; // u2n
+real rfactor3 = 1; // u3n
+
+// Read mesh 
+cpuTime = mpiWtime();
+mesh3 Mesh = readmesh3("fluid.mesh"); 
+mesh3 Solid = readmesh3("solid.mesh");
+if (mpirank == 0)
+  print("Read mesh in " + (mpiWtime() - cpuTime) + "s");
+
+mesh3 MeshBackup = Mesh;
+mesh3 Solid1 = Solid;
+mesh3 SolidBackup = Solid;
+
+// Global array
+fespace SpaceP0Global(MeshBackup, P0);
+fespace SpaceP0GlobalS(SolidBackup, P0);
+
+SpaceP0Global globinten=0;
+SpaceP0Global globvf=0;
+SpaceP0Global globk=0;
+SpaceP0Global globkcoe=0;
+
+SpaceP0GlobalS globintenS=0;
+SpaceP0GlobalS globvfS=0;
+SpaceP0GlobalS globkS=0;
+SpaceP0GlobalS globkcoeS=0;
+
+if (mpirank == 0)
+{
+  globinten[] = readsol("sol_files/inten.sol");
+  globvf[] = readsol("sol_files/vf.sol");
+  globk[] = readsol("sol_files/k.sol");
+  globkcoe[] = readsol("sol_files/kcoe.sol");
+  globintenS[] = readsol("sol_files/intenpla.sol");
+  globvfS[] = readsol("sol_files/vfpla.sol");
+  globkS[] = readsol("sol_files/kpla.sol");
+  globkcoeS[] = readsol("sol_files/kcoepla.sol");
+}
+broadcast(processor(0), globinten[]); // broadcast initialized function to all processes
+broadcast(processor(0), globvf[]);
+broadcast(processor(0), globk[]);
+broadcast(processor(0), globkcoe[]);
+broadcast(processor(0), globintenS[]); 
+broadcast(processor(0), globvfS[]);
+broadcast(processor(0), globkS[]);
+broadcast(processor(0), globkcoeS[]);
+
+// if(mpirank==0){
+//   savevtk("results/tmp/global.vtu", MeshBackup, globinten, globvf, globk, globkcoe, dataname=DataParameter, order=Order);
+// }
+
+// Set boundary label for the platelet aggregates mesh
+// Boundary label: 10
+func  newlabel = (z<1.0e-6)? 10 : 1; 
+Solid=change(Solid,flabel=newlabel);
+if (mpirank == 0)
+  print("End setting solid mesh boundary");
+
+// ---------------------------------------------------------------------------
+int[int] myN2O;
+macro MeshN2O() myN2O//
+Mat NS;
+buildDmesh(Mesh);
+{
+  macro def(i)[i, i#B, i#C, i#D]//
+  macro init(i)[i, i, i, i]// EOM
+  createMat(Mesh, NS, PkVector)
+}
+
+int[int] myN2OS;
+macro SolidN2O() myN2OS//
+Mat A;
+buildDmesh(Solid);
+{
+  macro def(i)[i, i#B, i#C]// EOM
+  macro init(i)[i, i, i]// EOM 
+  createMat(Solid, A, Pk)
+}
+Mat EP0;
+createMat(Solid,EP0,P0);
+
+Mat EP1;
+createMat(Solid,EP1,P1);
+
+buildDmesh(Solid1);
+
+Mat EP2;
+createMat(Solid1,EP2,P2);
+
+fespace SpaceVector(Mesh, PkVector); // Velocity space
+fespace SpaceP2(Mesh, P2); // Rate fields
+fespace SpaceP1(Mesh, P1); 
+fespace SpaceP0(Mesh, P0);
+
+fespace SpaceVectorS(Solid, PkVector); // Aggregate velocity space
+fespace SpaceP2S(Solid, P2);
+fespace SpaceP0S(Solid, P0); // Parameters on aggregates
+fespace SpacePkS(Solid, Pk); // Aggregate material space
+fespace SpaceP1S(Solid, P1);
+
+fespace SpaceP2S1(Solid1, P2);
+fespace SpaceP1S1(Solid1, P1); 
+fespace SpaceP0S1(Solid1, P0); 
+
+SpaceVector [ux, uy, uz, p], [upx, upy, upz, pp];
+SpaceP2 fx, fy, fz;
+
+SpaceVectorS [uxpla, uypla, uzpla, ppla];
+SpaceP2S fxpla, fypla, fzpla;
+SpaceP2S1 fxplaS1, fyplaS1, fzplaS1;
+
+SpaceP1S fxplaP1, fyplaP1, fzplaP1;
+SpaceP1S1 fxplaS1P1, fyplaS1P1, fzplaS1P1;
+
+// int[int] rstP1 = restrict(SpaceP1, SpaceP1Global, myN2O);
+// int[int] rstP1S = restrict(SpaceP1S, SpaceP1GlobalS, myN2OS);
+
+int[int] rstP0 = restrict(SpaceP0, SpaceP0Global, myN2O);
+int[int] rstP0S = restrict(SpaceP0S, SpaceP0GlobalS, myN2OS);
+
+SpaceP2 umagdelta, umagsquare, shearrate, shearstress, elonrate;
+SpaceP2S shearratepla, shearstresspla, elonratepla;
+
+// Fluid simulation parameters
+SpaceP0 inten = 0; // Read intensity
+SpaceP0 vf = 0; // Volume factor
+SpaceP0 k = 0; // Permeability
+SpaceP0 kcoe = 0; // Darcy term coefficient
+
+inten[] = globinten[](rstP0);
+vf[] = globvf[](rstP0);
+k[] = globk[](rstP0);
+kcoe[] = globkcoe[](rstP0);
+
+// Platelet aggregates information
+SpaceP0S intenpla = 0;
+SpaceP0S vfpla = 0;
+SpaceP0S kpla = 0;
+SpaceP0S kcoepla = 0; 
+
+intenpla[] = globintenS[](rstP0S);
+vfpla[] = globvfS[](rstP0S);
+kpla[] = globkS[](rstP0S);
+kcoepla[] = globkcoeS[](rstP0S);
+
+SpaceP0S vfplaInitial = vfpla; // Initial vf used to be calculate updated vf; never change, always equal to initial vf
+SpaceP0S vfplaold = vfpla; // vfold in neoHookean iteration
+SpaceP0S vfdelta; // vf difference between each step
+
+// savevtk("results/refer/solid.vtu",Solid, intenpla, vfpla, kpla, kcoepla, dataname = DataParameter, order = OrderDeform);
+
+SpaceP0S1 vfplaS1, kplaS1, kcoeplaS1;
+
+// Material parameters
+real muguess;
+ifstream file("muguess.txt");
+file >> muguess;
+
+SpaceP0S mu = muguess*vfpla; //shear modulus
+SpaceP0S Emodulus = 3.*mu/(1+(1-vfpla)^2/2); // Young's modulus
+SpaceP0S Pratio = (1-(1-vfpla)^2)/(2+(1-vfpla)^2); // Possion's ratio
+SpaceP0S lame = Emodulus*Pratio/((1+Pratio)*(1-2.*Pratio)) ; //Lame coefficient
+
+// Material
+macro mat [lame,mu] //
+
+SpacePkS [u1n,u2n,u3n], [vv1,vv2,vv3], [ww1,ww2,ww3];
+SpacePkS [u1nAssumpt,u2nAssumpt,u3nAssumpt], [r1n,r2n,r3n], [rp1n,rp2n,rp3n], [r1upper,r2upper,r3upper],[r1lower,r2lower,r3lower];
+SpacePkS [auxVec1, auxVec2, auxVec3]; //The individual elements of the total 1st Piola-Kirchoff stress
+
+SpaceP1S undelta, unMagnitude;
+SpaceP0S VolumeStrain, VonMisesStr;
+SpaceP0S1 VonMisesStrDef; // von Mises stress saved on deformed mesh
+
+// Set variable for interpolation from Solid to Solid1 (only P1 work)
+SpaceP1S vfplaP1 = 0;
+SpaceP1S1 vfplaS1P1 = 0;
+SpaceP1S VonMisesStrP1 = 0;
+SpaceP1S1 VonMisesStrDefP1 = 0;
+
+if (mpirank==0)
+{
+  print("Finite Element DOF: " + SpaceP2.ndof);
+  print("Number of Elements: " + Mesh.nt);
+}
+
+// ------------------------------------------------------------------------------
+
+varf navierstokes([ux, uy, uz, p], [uhx, uhy, uhz, ph]) =  
+      int3d(Mesh)(nu * (Grad(u):Grad(uh)))
+    + int3d(Mesh)(UgradV(up,u)' * [uhx, uhy, uhz])
+    - int3d(Mesh)(p * div(uh))
+    - int3d(Mesh)(ph * div(u))
+    - int3d(Mesh) (1e-10 * p * ph)
+    + int3d(Mesh) (1/rho * kcoe * ux * uhx)
+    + int3d(Mesh) (1/rho * kcoe * uy * uhy)
+    + int3d(Mesh) (1/rho * kcoe * uz * uhz)
+    + on(5,6, ux=0, uy=0, uz=0)
+    + on(1,2, ux=0, uy=uin, uz=0)
+    + on(Inlet, ux=0, uy=uin, uz=0)
+    ;
+
+varf neoHookeanInc ([vv1, vv2, vv3], [ww1, ww2, ww3])
+    = int3d(Solid, qforder=1)(
+       ( amat11 (mat, un, vv) + bmat11 (mat, un, vv) )* dudx11(ww)
+     + ( amat12 (mat, un, vv) + bmat12 (mat, un, vv) )* dudx12(ww)
+     + ( amat13 (mat, un, vv) + bmat13 (mat, un, vv) )* dudx13(ww)
+     + ( amat21 (mat, un, vv) + bmat21 (mat, un, vv) )* dudx21(ww)
+     + ( amat22 (mat, un, vv) + bmat22 (mat, un, vv) )* dudx22(ww)
+     + ( amat23 (mat, un, vv) + bmat23 (mat, un, vv) )* dudx23(ww)
+     + ( amat31 (mat, un, vv) + bmat31 (mat, un, vv) )* dudx31(ww)
+     + ( amat32 (mat, un, vv) + bmat32 (mat, un, vv) )* dudx32(ww)
+     + ( amat33 (mat, un, vv) + bmat33 (mat, un, vv) )* dudx33(ww)
+    )
+    - int3d(Solid, qforder=1)(
+        psts11 (mat, un) * dudx11(ww) + psts12 (mat, un) * dudx12(ww) + psts13 (mat, un) * dudx13(ww)
+     +  psts21 (mat, un) * dudx21(ww) + psts22 (mat, un) * dudx22(ww) + psts23 (mat, un) * dudx23(ww)
+     +  psts31 (mat, un) * dudx31(ww) + psts32 (mat, un) * dudx32(ww) + psts33 (mat, un) * dudx33(ww)
+    )
+    // boundary condition:
+// load control
+   + int3d(Solid)(
+     fxpla * ww1 + fypla * ww2 + fzpla * ww3
+   )
+    + on(10,vv1=0,vv2=0,vv3=0)
+    ;
+
+// Fields initialization
+[ux, uy, uz, p]=[1.0, 1.0, 1.0, 2.0]; // fields numbers: 1: velocity, 2: pressure
+[upx, upy, upz, pp] = [ux, uy, uz, p];
+
+// Initialization
+[vv1,vv2,vv3] = [0.,0.,0.];
+[u1n,u2n,u3n] = [0.,0.,0.];
+
+real[int] NSrhs(SpaceVector.ndof);
+NS = navierstokes(SpaceVector, SpaceVector, tgv=-1);
+
+real[int] Arhs(SpacePkS.ndof);
+A = neoHookeanInc(SpacePkS, SpacePkS, tgv = -1);
+
+string[int] names(2);
+names[0] = "velocity";
+names[1] = "pressure";
+set(NS, sparams = "-ksp_type fgmres -pc_type fieldsplit -pc_fieldsplit_type schur "
+                + "-fieldsplit_velocity_pc_type gamg -fieldsplit_pressure_ksp_max_it 5 "
+                + "-fieldsplit_pressure_pc_type jacobi -fieldsplit_velocity_ksp_type preonly -pc_fieldsplit_schur_fact_type full",
+                fields = ux[], names = names);
+set(A, sparams = "-pc_type lu -mat_mumps_icntl_14 200"); // rea: 0m46.551s with 16 cores
+
+cpuTime = mpiWtime();   
+if (mpirank == 0)
+      print("Start 1st Navier-Stokes")
+for (int i = 0; i < 50; i++) 
+{
+  [upx, upy, upz, pp] = [ux, uy, uz, p];
+  NSrhs = navierstokes(0, SpaceVector, tgv=-1);
+  NS = navierstokes(SpaceVector, SpaceVector, tgv=-1);
+  // ux[] = 0;
+  ux[] = NS^-1 * NSrhs;
+
+  // Check time step convergence
+  res = sqrt(A(vv1[],vv1[]));
+  umagsquare = (sqrt(ux^2+uy^2+uz^2))^2;
+  umagdelta = (sqrt(ux^2+uy^2+uz^2) - sqrt(upx^2+upy^2+upz^2))^2;
+  real err = sqrt(umagdelta[].sum)/sqrt(umagsquare[].sum);
+
+  // Find the maximum error on all mpirank
+  real finalerr;
+  mpiAllReduce(err, finalerr, mpiCommWorld, mpiSUM);
+
+  // if(mpirank == 0)
+  //   print("NS error = "+finalerr)
+
+  if(finalerr<1e-6) break;
+}
+
+fx = kcoe*ux;
+fy = kcoe*uy;
+fz = kcoe*uz;
+
+// savevtk("results/tmp/model.vtu", Mesh, inten, vf, k, kcoe, p, ux, uy, uz, fx, fy, fz, shearrate, shearstress, elonrate, dataname=DataName, order=Order);
+if(mpirank == 0)
+    print("Solved in " + (mpiWtime() - cpuTime) + " s")
+
+if(mpirank == 0)
+    print("Interpolate force...")
+transfer(Mesh, P2, fx, Solid, P2, fxpla);
+transfer(Mesh, P2, fy, Solid, P2, fypla);
+transfer(Mesh, P2, fz, Solid, P2, fzpla);
+
+cpuTime = mpiWtime();
+if (mpirank == 0)
+      print("Start 1st neo-Hookean")
+for (int vfloop=0; vfloop<=50; vfloop++) {
+  res = 2.*tol;
+  while (res >= tol){
+    A = neoHookeanInc(SpacePkS, SpacePkS,tgv=-1);
+    Arhs = neoHookeanInc(0, SpacePkS,tgv=-1); 
+    
+    // vv1[] = 0;
+    vv1[] = A^-1 * Arhs;
+
+    res = sqrt(A(vv1[],vv1[]));
+    // if (mpirank == 0)
+    //   print("L^2 residual = "+res)
+
+    u1n[] += vv1[];
+  }
+  // Update vfpla
+  VolumeStrain = dx(u1n)+dy(u2n)+dz(u3n);
+  exchange(EP0, VolumeStrain[], scaled = true); // Exchange between neighbour (to communicate the ghost element for dx, dy, dz)
+  vfpla = vfplaInitial/(1+VolumeStrain); // Update vf: solid/(original volume + change of volume)
+
+  for (int j = 0.; j < Solid.nt; j++)
+  {
+    if(vfpla[][j]<0.01){
+      vfpla[][j] = 0.01;}
+    else if(vfpla[][j]>0.99){
+      vfpla[][j] = 0.99;}
+  }
+
+  // Check vf convergence
+  vfdelta = vfpla - vfplaold;
+  real vferror = vfdelta[].max;
+  
+  real finalvferr;
+  mpiAllReduce(vferror, finalvferr, mpiCommWorld, mpiMAX); // Find the maximum error on all mpirank
+  if(mpirank == 0)
+    print("Neo-Hookean vf error = "+finalvferr)
+
+  // savevtk("results/solid/refer.vtu",Solid, vfpla, vfplaInitial, vfplaold, dataname = "vfpla vfinitial vfold", order=OrderOne);
+
+
+  // Update vf
+  vfplaold = vfpla;
+  
+  // Update parameters
+  Emodulus = 3.*mu/(1+(1-vfpla)^2/2); // Young's modulus
+  Pratio = (1-(1-vfpla)^2)/(2+(1-vfpla)^2); // Possion's ratio
+  lame = Emodulus*Pratio/((1+Pratio)*(1-2.*Pratio)) ; //Lame coefficient
+
+  // savevtk("results/refer/refer.vtu",Solid, vfpla, vfplaInitial, VolumeStrain, vfplaold, VonMisesStr, u1n, u2n, u3n, unMagnitude, dataname = DataOne, order=OrderOne,
+  //       append = vfloop ? true : false);
+
+  if(finalvferr<vftol){  
+    break;
+  }
+}
+if(mpirank == 0)
+    print("Solved in " + (mpiWtime() - cpuTime) + " s")
+
+real alpha = 1.0;
+Solid1 = movemesh(Solid, [x + alpha * u1n, y + alpha * u2n, z + alpha * u3n]);
+unMagnitude = sqrt(u1n^2 + u2n^2 + u3n^2);
+
+// // reconstructDmesh(Solid1);
+// saveDmesh(Solid, "un/solid");
+// ofstream sol("un/u1n_" + mpirank + "_" + mpisize + ".sol");
+// sol << u1n[];
+if (mpirank == 0)
+  print("Finish moving ... ");
+[u1nAssumpt,u2nAssumpt,u3nAssumpt] = [u1n,u2n,u3n];
+VolumeStrain = dx(u1nAssumpt)+dy(u2nAssumpt)+dz(u3nAssumpt);
+exchange(EP0, VolumeStrain[], scaled = true);
+vfpla = vfplaInitial/(1+VolumeStrain);
+
+// Interpolate vf to deformed solid
+vfplaP1 = vfpla;
+
+vfplaS1P1 = 0;
+vfplaS1P1 = vfplaP1(x-u1n,y-u2n,z-u3n);
+
+for (int j = 0.; j < Solid1.nv; j++)
+{
+  if(vfplaS1P1[](j)<0.01){
+    vfplaS1P1[](j) = 0.01;}
+  else if(vfplaS1P1[](j)>0.99){
+    vfplaS1P1[](j) = 0.99;}
+}
+
+vfplaS1 = 0;
+vfplaS1 = vfplaS1P1;
+
+kplaS1 = 0;
+kcoeplaS1 = 0;
+
+kplaS1 = spher^2 * (1 - vfplaS1)^3 * dia^2 / (150 * (vfplaS1)^2);
+kcoeplaS1 = miu / kplaS1;
+
+VonMisesStr = VonMisesStress(mat,un);
+exchange(EP0, VonMisesStr[], scaled = true);
+// Interpolate von Mises stress to deformed solid
+VonMisesStrP1 = VonMisesStr;
+VonMisesStrDefP1 = VonMisesStrP1(x-u1n,y-u2n,z-u3n);
+VonMisesStrDef = VonMisesStrDefP1;
+
+// savevtk("results/refer/refer.vtu",Solid, vfpla, vfplaInitial, VolumeStrain, vfplaold, VonMisesStr, u1n, u2n, u3n, unMagnitude, dataname = DataOne, order=OrderOne);
+// savevtk("results/refer/deform.vtu",Solid1, VonMisesStrDef, vfplaS1, kplaS1, kcoeplaS1, dataname = DataDeform, order=OrderDeform);
+
+if (mpirank == 0)
+  print("Interpolate kcoe back to CFD domain");
+vf = 0;
+kcoe = 0;
+transfer(Solid1, P0, kcoeplaS1, Mesh, P0, kcoe)
+transfer(Solid1, P0, vfplaS1, Mesh, P0, vf)
+
+// savevtk("results/test/mesh.vtu", Mesh, inten, vf, k, kcoe, p, ux, uy, uz, fx, fy, fz, shearrate, shearstress, elonrate, dataname=DataName, order=Order);
+   
+
+for (int convStep = 0; convStep < 200; convStep++){
+  cpuTime = mpiWtime();
+  NS = navierstokes(SpaceVector, SpaceVector, tgv=-1);
+  if (mpirank == 0)
+      print("Start Navier-Stokes "+convStep)
+  for (int i = 0; i < 50; i++) 
+  {
+    [upx, upy, upz, pp] = [ux, uy, uz, p];
+    NSrhs = navierstokes(0, SpaceVector, tgv=-1);
+    NS = navierstokes(SpaceVector, SpaceVector, tgv=-1);
+    // ux[] = 0;
+    ux[] = NS^-1 * NSrhs;
+
+    // Check time step convergence
+    umagsquare = (sqrt(ux^2+uy^2+uz^2))^2;
+    umagdelta = (sqrt(ux^2+uy^2+uz^2) - sqrt(upx^2+upy^2+upz^2))^2;
+    real err = sqrt(umagdelta[].sum)/sqrt(umagsquare[].sum);
+
+    // Find the maximum error on all mpirank
+    real finalerr;
+    mpiAllReduce(err, finalerr, mpiCommWorld, mpiSUM);
+
+    // if(mpirank == 0)
+    //   print("NS error = "+finalerr)
+
+    if(finalerr<1e-6) break;
+  }
+
+  shearrate = sqrt(2*((dx(ux))^2+dy(uy)^2+dz(uz)^2)
+                    +(dz(ux)+dx(uz))^2+(dy(ux)+dx(uy))^2+(dy(uz)+dz(uy))^2);
+  shearstress = miu * shearrate;
+  elonrate = sqrt((dx(ux))^2+dy(uy)^2+dz(uz)^2);
+
+  fx = kcoe*ux;
+  fy = kcoe*uy;
+  fz = kcoe*uz;
+
+  // savevtk("results/tmp/model.vtu", Mesh, inten, vf, k, kcoe, p, ux, uy, uz, fx, fy, fz, shearrate, shearstress, elonrate, dataname=DataName, order=Order,
+  //         append = convStep ? true : false);
+
+  if(mpirank == 0)
+      print("Loop "+convStep+" NS solved in " + (mpiWtime() - cpuTime) + " s")
+
+  if(mpirank == 0)
+      print("Interpolate force...")
+  transfer(Mesh, P2, fx, Solid1, P2, fxplaS1);
+  transfer(Mesh, P2, fy, Solid1, P2, fyplaS1);
+  transfer(Mesh, P2, fz, Solid1, P2, fzplaS1);
+
+  fxplaS1P1 = fxplaS1;
+  fyplaS1P1 = fyplaS1;
+  fzplaS1P1 = fzplaS1;
+
+  fxplaP1 = fxplaS1P1(x-u1nAssumpt,y-u2nAssumpt,z-u3nAssumpt); // deformed mesh to solid mesh
+  fyplaP1 = fyplaS1P1(x-u1nAssumpt,y-u2nAssumpt,z-u3nAssumpt);
+  fzplaP1 = fzplaS1P1(x-u1nAssumpt,y-u2nAssumpt,z-u3nAssumpt);
+
+  exchange(EP1, fxplaP1[], scaled = true);
+  exchange(EP1, fyplaP1[], scaled = true);
+  exchange(EP1, fzplaP1[], scaled = true);
+
+  fxpla = fxplaP1;
+  fypla = fyplaP1;
+  fzpla = fzplaP1;
+
+  // savevtk("results/test/refer.vtu",Solid, fxpla, fypla, fzpla, fxplaP1, fyplaP1, fzplaP1, dataname = "fx fy fz fxP1 fyP1 fzP1", order = Order);
+  // savevtk("results/test/deform.vtu",Solid1, fxplaS1, fyplaS1, fzplaS1, fxplaS1P1, fyplaS1P1, fzplaS1P1, dataname = "fx fy fz fxP1 fyP1 fzP1", order = Order);
+
+  if(mpirank == 0)
+    print("Update residual for Neo-Hookean")
+  res = 2*tol;
+
+  [u1n,u2n,u3n] = [0.,0.,0.];
+
+  cpuTime = mpiWtime();
+  // Update vf
+  vfpla = vfplaInitial;
+  
+  // Update parameters
+  Emodulus = 3.*mu/(1+(1-vfpla)^2/2); // Young's modulus
+  Pratio = (1-(1-vfpla)^2)/(2+(1-vfpla)^2); // Possion's ratio
+  lame = Emodulus*Pratio/((1+Pratio)*(1-2.*Pratio)) ; //Lame coefficient
+  
+  if (mpirank == 0)
+        print("Start neo-Hookean "+convStep)
+  for (int vfloop=0; vfloop<=50; vfloop++) {
+    res = 2.*tol;
+    while (res >= tol){
+      A = neoHookeanInc(SpacePkS, SpacePkS,tgv=-1);
+      Arhs = neoHookeanInc(0, SpacePkS,tgv=-1); 
+      
+      // vv1[] = 0;
+      vv1[] = A^-1 * Arhs;
+
+      res = sqrt(A(vv1[],vv1[]));
+      // if (mpirank == 0)
+      //   print("L^2 residual = "+res)
+
+      u1n[] += vv1[];
+    }
+    // Update vfpla
+    VolumeStrain = dx(u1n)+dy(u2n)+dz(u3n);
+    exchange(EP0, VolumeStrain[], scaled = true); // Exchange between neighbour (to communicate the ghost element for dx, dy, dz)
+    vfpla = vfplaInitial/(1+VolumeStrain);
+
+    for (int j = 0.; j < Solid.nt; j++)
+    {
+      if(vfpla[][j]<0.01){
+        vfpla[][j] = 0.01;}
+      else if(vfpla[][j]>0.99){
+        vfpla[][j] = 0.99;}
+    }
+
+    // Check vf convergence
+    vfdelta = vfpla - vfplaold;
+    real vferror = vfdelta[].max;
+    
+    real finalvferr;
+    mpiAllReduce(vferror, finalvferr, mpiCommWorld, mpiMAX); // Find the maximum error on all mpirank
+    if(mpirank == 0)
+      print("Neo-Hookean vf error "+finalvferr)
+
+    // Update vf
+    vfplaold = vfpla;
+    
+    // Update parameters
+    Emodulus = 3.*mu/(1+(1-vfpla)^2/2); // Young's modulus
+    Pratio = (1-(1-vfpla)^2)/(2+(1-vfpla)^2); // Possion's ratio
+    lame = Emodulus*Pratio/((1+Pratio)*(1-2.*Pratio)) ; //Lame coefficient
+
+    if(finalvferr<vftol){  
+      break;
+    }
+  }
+  if(mpirank == 0)
+      print("Loop "+convStep+" neo-Hookean solved in " + (mpiWtime() - cpuTime) + " s")
+
+  Solid1 = movemesh(Solid, [x + alpha * u1n, y + alpha * u2n, z + alpha * u3n]);
+  unMagnitude = sqrt(u1n^2 + u2n^2 + u3n^2);
+
+  // Interpolate vf to deformed solid
+  vfplaP1 = vfpla;
+
+  vfplaS1P1 = 0;
+  vfplaS1P1 = vfplaP1(x-u1nAssumpt,y-u2nAssumpt,z-u3nAssumpt);
+
+  for (int j = 0.; j < Solid1.nv; j++)
+  {
+    if(vfplaS1P1[](j)<0.01){
+      vfplaS1P1[](j) = 0.01;}
+    else if(vfplaS1P1[](j)>0.99){
+      vfplaS1P1[](j) = 0.99;}
+  }
+
+  vfplaS1 = 0;
+  vfplaS1 = vfplaS1P1;
+
+  kplaS1 = 0;
+  kcoeplaS1 = 0;
+
+  kplaS1 = spher^2 * (1 - vfplaS1)^3 * dia^2 / (150 * (vfplaS1)^2);
+  kcoeplaS1 = miu / kplaS1;
+
+  VonMisesStr = VonMisesStress(mat,un);
+  exchange(EP0, VonMisesStr[], scaled = true);
+  // Interpolate von Mises stress to deformed solid
+  VonMisesStrP1 = VonMisesStr;
+  VonMisesStrDefP1 = VonMisesStrP1(x-u1nAssumpt,y-u2nAssumpt,z-u3nAssumpt);
+  VonMisesStrDef = VonMisesStrDefP1;
+
+  // savevtk("results/solid/refer.vtu",Solid, vfpla, vfplaInitial, VolumeStrain, VonMisesStr, u1n, u2n, u3n, unMagnitude, u1nAssumpt, u2nAssumpt, u3nAssumpt, fxpla, fypla, fzpla, undelta, dataname = DataRefer, order=OrderRefer,
+  //         append = convStep ? true : false);
+  // savevtk("results/solid/deform.vtu",Solid1, VonMisesStrDef, vfplaS1, kplaS1, kcoeplaS1, fxplaS1, fyplaS1, fzplaS1, dataname = DataDeform, order=OrderDeform,
+  //         append = convStep ? true : false);
+
+  if(mpirank == 0)
+      print("Check un convergence...")
+  [r1n,r2n,r3n] = [u1n-u1nAssumpt,u2n-u2nAssumpt,u3n-u3nAssumpt];
+  undelta = sqrt(r1n^2+r2n^2+r3n^2);
+  real unerr = undelta[].max;
+
+  if(convStep==0){
+    [rp1n,rp2n,rp3n] = [2*r1n,2*r2n,2*r3n];
+  }
+
+  // Find the maximum error on all mpirank
+  real finalunerr;
+  mpiAllReduce(unerr, finalunerr, mpiCommWorld, mpiMAX);
+
+  if(mpirank == 0)
+    print("Final un error "+finalunerr)
+
+  if(finalunerr<1e-5){  
+    savevtk("trial_deform/deform.vtu",Solid1, VonMisesStrDef, vfplaS1, kplaS1, kcoeplaS1, fxplaS1, fyplaS1, fzplaS1, dataname = DataDeform, order=OrderDeform);
+    break;
+  } 
+  else{
+    [r1upper,r2upper,r3upper]=[rp1n*(r1n-rp1n),rp2n*(r2n-rp2n),rp3n*(r3n-rp3n)];
+    [r1lower,r2lower,r3lower]=[(r1n-rp1n)^2,(r2n-rp2n)^2,(r3n-rp3n)^2];
+
+    real r1upperS = r1upper[].sum;
+    real r2upperS = r2upper[].sum;
+    real r3upperS = r3upper[].sum;
+    real r1lowerS = r1lower[].sum;
+    real r2lowerS = r2lower[].sum;
+    real r3lowerS = r3lower[].sum;
+
+    real r1upperSA, r2upperSA, r3upperSA, r1lowerSA, r2lowerSA, r3lowerSA;
+    mpiAllReduce(r1upperS, r1upperSA, mpiCommWorld, mpiSUM);
+    mpiAllReduce(r2upperS, r2upperSA, mpiCommWorld, mpiSUM);
+    mpiAllReduce(r3upperS, r3upperSA, mpiCommWorld, mpiSUM);
+    mpiAllReduce(r1lowerS, r1lowerSA, mpiCommWorld, mpiSUM);
+    mpiAllReduce(r2lowerS, r2lowerSA, mpiCommWorld, mpiSUM);
+    mpiAllReduce(r3lowerS, r3lowerSA, mpiCommWorld, mpiSUM);
+
+    rfactor1 = -rfactor1*(r1upperSA/r1lowerSA);
+    rfactor2 = -rfactor2*(r2upperSA/r2lowerSA);
+    rfactor3 = -rfactor3*(r3upperSA/r3lowerSA);
+
+    [rp1n,rp2n,rp3n] = [r1n,r2n,r3n];
+
+    [u1nAssumpt,u2nAssumpt,u3nAssumpt]=[u1nAssumpt+rfactor1*r1n,u2nAssumpt+rfactor2*r2n,u3nAssumpt+rfactor3*r3n];
+    
+
+    Solid1 = movemesh(Solid, [x + alpha * u1nAssumpt, y + alpha * u2nAssumpt, z + alpha * u3nAssumpt]);
+    unMagnitude = sqrt(u1nAssumpt^2 + u2nAssumpt^2 + u3nAssumpt^2);
+
+    VolumeStrain = dx(u1nAssumpt) + dy(u2nAssumpt) + dz(u3nAssumpt);
+    exchange(EP0, VolumeStrain[], scaled = true);
+    
+    if (mpirank == 0)
+      print("Update platelet density");
+    vfpla = vfplaInitial/(1+VolumeStrain);
+    // savevtk("results/solid/refer.vtu",Solid, vfpla, vfplaInitial, VolumeStrain, VonMisesStr, u1n, u2n, u3n, unMagnitude, u1nAssumpt, u2nAssumpt, u3nAssumpt, dataname = DataRefer, order=OrderRefer,
+    //     append = convStep ? true : false);
+
+    for (int j = 0.; j < Solid.nt; j++)
+    {
+      if(vfpla[][j]<0.01){
+        vfpla[][j] = 0.01;}
+      else if(vfpla[][j]>0.99){
+        vfpla[][j] = 0.99;}
+    }
+
+    // Interpolate vf to deformed solid
+    vfplaP1 = vfpla;
+
+    vfplaS1P1 = 0;
+    vfplaS1P1 = vfplaP1(x-u1nAssumpt,y-u2nAssumpt,z-u3nAssumpt);
+
+    for (int j = 0.; j < Solid1.nv; j++)
+    {
+      if(vfplaS1P1[](j)<0.01){
+        vfplaS1P1[](j) = 0.01;}
+      else if(vfplaS1P1[](j)>0.99){
+        vfplaS1P1[](j) = 0.99;}
+    }
+
+    vfplaS1 = 0;
+    vfplaS1 = vfplaS1P1;
+
+    // savevtk("results/solid/deform.vtu",Solid1, VonMisesStrDef, vfplaS1, kplaS1, kcoeplaS1, dataname = DataDeform, order=OrderDeform,
+    //       append = convStep ? true : false);
+
+    kplaS1 = 0;
+    kcoeplaS1 = 0;
+
+    kplaS1 = spher^2 * (1 - vfplaS1)^3 * dia^2 / (150 * (vfplaS1)^2);
+    kcoeplaS1 = miu / kplaS1;
+  
+    if (mpirank == 0)
+      print("Interpolate kcoe");
+    vf = 0;
+    kcoe = 0;
+    transfer(Solid1, P0, kcoeplaS1, Mesh, P0, kcoe)
+    transfer(Solid1, P0, vfplaS1, Mesh, P0, vf)
+    
+  }
+
+}

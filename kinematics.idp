@@ -1,0 +1,482 @@
+//-----------------------------------------------------------
+// Kinematics
+//-----------------------------------------------------------
+
+//displacement
+macro uup [uup1,uup2,uup3] //
+macro vv [vv1,vv2,vv3] //
+macro ww [ww1,ww2,ww3] //
+macro un [u1n,u2n,u3n] //
+macro unAssumpt [u1nAssumpt,u2nAssumpt,u3nAssumpt] //
+
+// displacement gradient @ two-point
+macro dudx11(uup) ( dx( uup[0] )) //
+macro dudx12(uup) ( dy( uup[0] )) //
+macro dudx13(uup) ( dz( uup[0] )) //
+macro dudx21(uup) ( dx( uup[1] )) //
+macro dudx22(uup) ( dy( uup[1] )) //
+macro dudx23(uup) ( dz( uup[1] )) //
+macro dudx31(uup) ( dx( uup[2] )) //
+macro dudx32(uup) ( dy( uup[2] )) //
+macro dudx33(uup) ( dz( uup[2] )) //
+
+//deformation gradient @ two-point
+macro F11(uup) (1.0 + dudx11(uup)) //
+macro F12(uup) (      dudx12(uup)) //
+macro F13(uup) (      dudx13(uup)) //
+macro F21(uup) (      dudx21(uup)) //
+macro F22(uup) (1.0 + dudx22(uup)) //
+macro F23(uup) (      dudx23(uup)) //
+macro F31(uup) (      dudx31(uup)) //
+macro F32(uup) (      dudx32(uup)) //
+macro F33(uup) (1.0 + dudx33(uup)) //
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+//-----------------------------------------------------------
+// Constitutive model (neo-Hookean hyperelasticity)
+//-----------------------------------------------------------
+// Macro for the minor matrix of the deformation gradient
+macro Fmin11(uup) (F22(uup) * F33(uup) - F23(uup) * F32(uup)) //
+macro Fmin12(uup) (F21(uup) * F33(uup) - F23(uup) * F31(uup)) //
+macro Fmin13(uup) (F21(uup) * F32(uup) - F22(uup) * F31(uup)) //
+macro Fmin21(uup) (F12(uup) * F33(uup) - F13(uup) * F32(uup)) //
+macro Fmin22(uup) (F11(uup) * F33(uup) - F13(uup) * F31(uup)) //
+macro Fmin23(uup) (F11(uup) * F32(uup) - F12(uup) * F31(uup)) //
+macro Fmin31(uup) (F12(uup) * F23(uup) - F13(uup) * F22(uup)) //
+macro Fmin32(uup) (F11(uup) * F23(uup) - F13(uup) * F21(uup)) //
+macro Fmin33(uup) (F11(uup) * F22(uup) - F12(uup) * F21(uup)) //
+
+//determinant of deformation gradient
+macro detF(uup) ( F11(uup) * Fmin11(uup)
+    - F12(uup) * Fmin12(uup)
+    + F13(uup) * Fmin13(uup)) //
+
+// Macro for the cofactor matrix of the deformation gradient
+macro Fcof11(uup) (1.0 * Fmin11(uup)) // 
+macro Fcof12(uup) (-1.0 * Fmin12(uup)) // 
+macro Fcof13(uup) (1.0 * Fmin13(uup)) // 
+macro Fcof21(uup) (-1.0 * Fmin21(uup)) // 
+macro Fcof22(uup) (1.0 * Fmin22(uup)) // 
+macro Fcof23(uup) (-1.0 * Fmin23(uup)) // 
+macro Fcof31(uup) (1.0 * Fmin31(uup)) // 
+macro Fcof32(uup) (-1.0 * Fmin32(uup)) // 
+macro Fcof33(uup) (1.0 * Fmin33(uup)) // 
+ 
+// Macro for the adjoint matrix of the deformation gradient (transpose of the cofactor matrix)
+macro Fadj11(uup) (Fcof11(uup)) //
+macro Fadj12(uup) (Fcof21(uup)) //
+macro Fadj13(uup) (Fcof31(uup)) //
+macro Fadj21(uup) (Fcof12(uup)) //
+macro Fadj22(uup) (Fcof22(uup)) //
+macro Fadj23(uup) (Fcof32(uup)) //
+macro Fadj31(uup) (Fcof13(uup)) //
+macro Fadj32(uup) (Fcof23(uup)) //
+macro Fadj33(uup) (Fcof33(uup)) //
+
+//inverse of deformation gradient
+//  Macros for the inverse of the deformation gradient A^-1 = (adj A) / (det A)
+macro Finv11 (uup) (Fadj11(uup) / detF(uup)) //
+macro Finv12 (uup) (Fadj12(uup) / detF(uup)) //
+macro Finv13 (uup) (Fadj13(uup) / detF(uup)) //
+macro Finv21 (uup) (Fadj21(uup) / detF(uup)) //
+macro Finv22 (uup) (Fadj22(uup) / detF(uup)) //
+macro Finv23 (uup) (Fadj23(uup) / detF(uup)) //
+macro Finv31 (uup) (Fadj31(uup) / detF(uup)) //
+macro Finv32 (uup) (Fadj32(uup) / detF(uup)) //
+macro Finv33 (uup) (Fadj33(uup) / detF(uup)) //
+
+//inverse of right Cauchy-Green deformation tensor @ reference
+macro ftfinv11(uup) (Finv11(uup)*Finv11(uup) + Finv12(uup)*Finv12(uup) + Finv13(uup)*Finv13(uup)) //
+macro ftfinv12(uup) (Finv11(uup)*Finv21(uup) + Finv12(uup)*Finv22(uup) + Finv13(uup)*Finv23(uup)) //
+macro ftfinv13(uup) (Finv11(uup)*Finv31(uup) + Finv12(uup)*Finv32(uup) + Finv13(uup)*Finv33(uup)) //
+macro ftfinv21(uup) (Finv11(uup)*Finv21(uup) + Finv12(uup)*Finv22(uup) + Finv13(uup)*Finv23(uup)) //
+macro ftfinv22(uup) (Finv21(uup)*Finv21(uup) + Finv22(uup)*Finv22(uup) + Finv23(uup)*Finv23(uup)) //
+macro ftfinv23(uup) (Finv31(uup)*Finv21(uup) + Finv32(uup)*Finv22(uup) + Finv33(uup)*Finv23(uup)) //
+macro ftfinv31(uup) (Finv11(uup)*Finv31(uup) + Finv12(uup)*Finv32(uup) + Finv13(uup)*Finv33(uup)) //
+macro ftfinv32(uup) (Finv21(uup)*Finv31(uup) + Finv22(uup)*Finv32(uup) + Finv23(uup)*Finv33(uup)) //
+macro ftfinv33(uup) (Finv31(uup)*Finv31(uup) + Finv32(uup)*Finv32(uup) + Finv33(uup)*Finv33(uup)) //
+
+// left Cauchy-Green deformation tensor @ reference
+macro fftinv11(uup) (F11(uup)*F11(uup) + F12(uup)*F12(uup) + F13(uup)*F13(uup)) //
+macro fftinv12(uup) (F11(uup)*F21(uup) + F12(uup)*F22(uup) + F13(uup)*F23(uup)) //
+macro fftinv13(uup) (F11(uup)*F31(uup) + F12(uup)*F32(uup) + F13(uup)*F33(uup)) //
+macro fftinv21(uup) (F21(uup)*F11(uup) + F22(uup)*F12(uup) + F23(uup)*F13(uup)) //
+macro fftinv22(uup) (F21(uup)*F21(uup) + F22(uup)*F22(uup) + F23(uup)*F23(uup)) //
+macro fftinv23(uup) (F21(uup)*F31(uup) + F22(uup)*F32(uup) + F23(uup)*F33(uup)) //
+macro fftinv31(uup) (F31(uup)*F11(uup) + F32(uup)*F12(uup) + F33(uup)*F13(uup)) //
+macro fftinv32(uup) (F31(uup)*F21(uup) + F32(uup)*F22(uup) + F33(uup)*F23(uup)) //
+macro fftinv33(uup) (F31(uup)*F31(uup) + F32(uup)*F32(uup) + F33(uup)*F33(uup)) //
+
+macro ela(mat,uup) (mat[0]*log(detF(uup))-mat[1]) //
+
+// Cauchy stress = Kirchhoff stress/det(F)
+macro StressK11(mat,uup) ((mat[1] * fftinv11(uup) + ela(mat,uup)) / detF(uup))//
+macro StressK12(mat,uup) ((mat[1] * fftinv12(uup)) / detF(uup)) //
+macro StressK13(mat,uup) ((mat[1] * fftinv13(uup)) / detF(uup)) //
+macro StressK21(mat,uup) ((mat[1] * fftinv21(uup)) / detF(uup)) //
+macro StressK22(mat,uup) ((mat[1] * fftinv22(uup) + ela(mat,uup)) / detF(uup))//
+macro StressK23(mat,uup) ((mat[1] * fftinv23(uup)) / detF(uup)) //
+macro StressK31(mat,uup) ((mat[1] * fftinv31(uup)) / detF(uup)) //
+macro StressK32(mat,uup) ((mat[1] * fftinv32(uup)) / detF(uup)) //
+macro StressK33(mat,uup) ((mat[1] * fftinv33(uup) + ela(mat,uup)) / detF(uup))//
+
+// The von mises stress
+macro VonMisesStress(mat,uup) (sqrt(1/2 * ((StressK11(mat,uup)-StressK22(mat,uup))^2 + (StressK22(mat,uup)-StressK33(mat,uup))^2 + (StressK33(mat,uup)-StressK11(mat,uup))^2) + 3 * (StressK12(mat,uup)^2 + StressK23(mat,uup)^2 + StressK31(mat,uup)^2)))//
+
+
+// 2nd Piola-Kirchhoff stress @ reference
+// note: sts12 -> ftfinv21
+macro sts11(mat,uup) ( ela(mat,uup) * ftfinv11(uup) + mat[1] )//
+macro sts12(mat,uup) ( ela(mat,uup) * ftfinv12(uup) )//
+macro sts13(mat,uup) ( ela(mat,uup) * ftfinv13(uup) )//
+macro sts21(mat,uup) ( ela(mat,uup) * ftfinv21(uup) )//
+macro sts22(mat,uup) ( ela(mat,uup) * ftfinv22(uup) + mat[1] )//
+macro sts23(mat,uup) ( ela(mat,uup) * ftfinv23(uup) )//
+macro sts31(mat,uup) ( ela(mat,uup) * ftfinv31(uup) )//
+macro sts32(mat,uup) ( ela(mat,uup) * ftfinv32(uup) )//
+macro sts33(mat,uup) ( ela(mat,uup) * ftfinv33(uup) + mat[1] )//
+
+// elastic tangent @ reference
+macro etan1111(mat,uup) ( mat[0]*ftfinv11(uup)*ftfinv11(uup) - ela(mat,uup)
+          * (ftfinv11(uup)*ftfinv11(uup) + ftfinv11(uup)*ftfinv11(uup)) ) //
+macro etan1112(mat,uup) ( mat[0]*ftfinv11(uup)*ftfinv12(uup) - ela(mat,uup)
+          * (ftfinv11(uup)*ftfinv12(uup) + ftfinv12(uup)*ftfinv11(uup)) ) //
+macro etan1113(mat,uup) ( mat[0]*ftfinv11(uup)*ftfinv13(uup) - ela(mat,uup)
+          * (ftfinv11(uup)*ftfinv13(uup) + ftfinv13(uup)*ftfinv11(uup)) ) //
+macro etan1121(mat,uup) ( mat[0]*ftfinv11(uup)*ftfinv21(uup) - ela(mat,uup)
+          * (ftfinv12(uup)*ftfinv11(uup) + ftfinv11(uup)*ftfinv12(uup)) ) //
+macro etan1122(mat,uup) ( mat[0]*ftfinv11(uup)*ftfinv22(uup) - ela(mat,uup)
+          * (ftfinv12(uup)*ftfinv12(uup) + ftfinv12(uup)*ftfinv12(uup)) ) //
+macro etan1123(mat,uup) ( mat[0]*ftfinv11(uup)*ftfinv23(uup) - ela(mat,uup)
+          * (ftfinv12(uup)*ftfinv13(uup) + ftfinv13(uup)*ftfinv12(uup)) ) //
+macro etan1131(mat,uup) ( mat[0]*ftfinv11(uup)*ftfinv31(uup) - ela(mat,uup)
+          * (ftfinv13(uup)*ftfinv11(uup) + ftfinv11(uup)*ftfinv13(uup)) ) //
+macro etan1132(mat,uup) ( mat[0]*ftfinv11(uup)*ftfinv32(uup) - ela(mat,uup)
+          * (ftfinv13(uup)*ftfinv12(uup) + ftfinv12(uup)*ftfinv13(uup)) ) //
+macro etan1133(mat,uup) ( mat[0]*ftfinv11(uup)*ftfinv33(uup) - ela(mat,uup)
+          * (ftfinv13(uup)*ftfinv13(uup) + ftfinv13(uup)*ftfinv13(uup)) ) //
+
+macro etan1211(mat,uup) ( mat[0]*ftfinv12(uup)*ftfinv11(uup) - ela(mat,uup)
+          * (ftfinv11(uup)*ftfinv21(uup) + ftfinv11(uup)*ftfinv21(uup)) ) //
+macro etan1212(mat,uup) ( mat[0]*ftfinv12(uup)*ftfinv12(uup) - ela(mat,uup)
+          * (ftfinv11(uup)*ftfinv22(uup) + ftfinv12(uup)*ftfinv21(uup)) ) //
+macro etan1213(mat,uup) ( mat[0]*ftfinv12(uup)*ftfinv13(uup) - ela(mat,uup)
+          * (ftfinv11(uup)*ftfinv23(uup) + ftfinv13(uup)*ftfinv21(uup)) ) //
+macro etan1221(mat,uup) ( mat[0]*ftfinv12(uup)*ftfinv21(uup) - ela(mat,uup)
+          * (ftfinv12(uup)*ftfinv21(uup) + ftfinv11(uup)*ftfinv22(uup)) ) //
+macro etan1222(mat,uup) ( mat[0]*ftfinv12(uup)*ftfinv22(uup) - ela(mat,uup)
+          * (ftfinv12(uup)*ftfinv22(uup) + ftfinv12(uup)*ftfinv22(uup)) ) //
+macro etan1223(mat,uup) ( mat[0]*ftfinv12(uup)*ftfinv23(uup) - ela(mat,uup)
+          * (ftfinv12(uup)*ftfinv23(uup) + ftfinv13(uup)*ftfinv22(uup)) ) //
+macro etan1231(mat,uup) ( mat[0]*ftfinv12(uup)*ftfinv31(uup) - ela(mat,uup)
+          * (ftfinv13(uup)*ftfinv21(uup) + ftfinv11(uup)*ftfinv23(uup)) ) //
+macro etan1232(mat,uup) ( mat[0]*ftfinv12(uup)*ftfinv32(uup) - ela(mat,uup)
+          * (ftfinv13(uup)*ftfinv22(uup) + ftfinv12(uup)*ftfinv23(uup)) ) //
+macro etan1233(mat,uup) ( mat[0]*ftfinv12(uup)*ftfinv33(uup) - ela(mat,uup)
+          * (ftfinv13(uup)*ftfinv23(uup) + ftfinv13(uup)*ftfinv23(uup)) ) //
+
+macro etan1311(mat,uup) ( mat[0]*ftfinv13(uup)*ftfinv11(uup) - ela(mat,uup)
+          * (ftfinv11(uup)*ftfinv31(uup) + ftfinv11(uup)*ftfinv31(uup)) ) //
+macro etan1312(mat,uup) ( mat[0]*ftfinv13(uup)*ftfinv12(uup) - ela(mat,uup)
+          * (ftfinv11(uup)*ftfinv32(uup) + ftfinv12(uup)*ftfinv31(uup)) ) //
+macro etan1313(mat,uup) ( mat[0]*ftfinv13(uup)*ftfinv13(uup) - ela(mat,uup)
+          * (ftfinv11(uup)*ftfinv33(uup) + ftfinv13(uup)*ftfinv31(uup)) ) //
+macro etan1321(mat,uup) ( mat[0]*ftfinv13(uup)*ftfinv21(uup) - ela(mat,uup)
+          * (ftfinv12(uup)*ftfinv31(uup) + ftfinv11(uup)*ftfinv32(uup)) ) //
+macro etan1322(mat,uup) ( mat[0]*ftfinv13(uup)*ftfinv22(uup) - ela(mat,uup)
+          * (ftfinv12(uup)*ftfinv32(uup) + ftfinv12(uup)*ftfinv32(uup)) ) //
+macro etan1323(mat,uup) ( mat[0]*ftfinv13(uup)*ftfinv23(uup) - ela(mat,uup)
+          * (ftfinv12(uup)*ftfinv33(uup) + ftfinv13(uup)*ftfinv32(uup)) ) //
+macro etan1331(mat,uup) ( mat[0]*ftfinv13(uup)*ftfinv31(uup) - ela(mat,uup)
+          * (ftfinv13(uup)*ftfinv31(uup) + ftfinv11(uup)*ftfinv33(uup)) ) //
+macro etan1332(mat,uup) ( mat[0]*ftfinv13(uup)*ftfinv32(uup) - ela(mat,uup)
+          * (ftfinv13(uup)*ftfinv32(uup) + ftfinv12(uup)*ftfinv33(uup)) ) //
+macro etan1333(mat,uup) ( mat[0]*ftfinv13(uup)*ftfinv33(uup) - ela(mat,uup)
+          * (ftfinv13(uup)*ftfinv33(uup) + ftfinv13(uup)*ftfinv33(uup)) ) //
+
+macro etan2111(mat,uup) ( mat[0]*ftfinv21(uup)*ftfinv11(uup) - ela(mat,uup)
+          * (ftfinv21(uup)*ftfinv11(uup) + ftfinv21(uup)*ftfinv11(uup)) ) //
+macro etan2112(mat,uup) ( mat[0]*ftfinv21(uup)*ftfinv12(uup) - ela(mat,uup)
+          * (ftfinv21(uup)*ftfinv12(uup) + ftfinv22(uup)*ftfinv11(uup)) ) //
+macro etan2113(mat,uup) ( mat[0]*ftfinv21(uup)*ftfinv13(uup) - ela(mat,uup)
+          * (ftfinv21(uup)*ftfinv13(uup) + ftfinv23(uup)*ftfinv11(uup)) ) //
+macro etan2121(mat,uup) ( mat[0]*ftfinv21(uup)*ftfinv21(uup) - ela(mat,uup)
+          * (ftfinv22(uup)*ftfinv11(uup) + ftfinv21(uup)*ftfinv12(uup)) ) //
+macro etan2122(mat,uup) ( mat[0]*ftfinv21(uup)*ftfinv22(uup) - ela(mat,uup)
+          * (ftfinv22(uup)*ftfinv12(uup) + ftfinv22(uup)*ftfinv12(uup)) ) //
+macro etan2123(mat,uup) ( mat[0]*ftfinv21(uup)*ftfinv23(uup) - ela(mat,uup)
+          * (ftfinv22(uup)*ftfinv13(uup) + ftfinv23(uup)*ftfinv12(uup)) ) //
+macro etan2131(mat,uup) ( mat[0]*ftfinv21(uup)*ftfinv31(uup) - ela(mat,uup)
+          * (ftfinv23(uup)*ftfinv11(uup) + ftfinv21(uup)*ftfinv13(uup)) ) //
+macro etan2132(mat,uup) ( mat[0]*ftfinv21(uup)*ftfinv32(uup) - ela(mat,uup)
+          * (ftfinv23(uup)*ftfinv12(uup) + ftfinv22(uup)*ftfinv13(uup)) ) //
+macro etan2133(mat,uup) ( mat[0]*ftfinv21(uup)*ftfinv33(uup) - ela(mat,uup)
+          * (ftfinv23(uup)*ftfinv13(uup) + ftfinv23(uup)*ftfinv13(uup)) ) //
+
+macro etan2211(mat,uup) ( mat[0]*ftfinv22(uup)*ftfinv11(uup) - ela(mat,uup)
+          * (ftfinv21(uup)*ftfinv21(uup) + ftfinv21(uup)*ftfinv21(uup)) ) //
+macro etan2212(mat,uup) ( mat[0]*ftfinv22(uup)*ftfinv12(uup) - ela(mat,uup)
+          * (ftfinv21(uup)*ftfinv22(uup) + ftfinv22(uup)*ftfinv21(uup)) ) //
+macro etan2213(mat,uup) ( mat[0]*ftfinv22(uup)*ftfinv13(uup) - ela(mat,uup)
+          * (ftfinv21(uup)*ftfinv23(uup) + ftfinv23(uup)*ftfinv21(uup)) ) //
+macro etan2221(mat,uup) ( mat[0]*ftfinv22(uup)*ftfinv21(uup) - ela(mat,uup)
+          * (ftfinv22(uup)*ftfinv21(uup) + ftfinv21(uup)*ftfinv22(uup)) ) //
+macro etan2222(mat,uup) ( mat[0]*ftfinv22(uup)*ftfinv22(uup) - ela(mat,uup)
+          * (ftfinv22(uup)*ftfinv22(uup) + ftfinv22(uup)*ftfinv22(uup)) ) //
+macro etan2223(mat,uup) ( mat[0]*ftfinv22(uup)*ftfinv23(uup) - ela(mat,uup)
+          * (ftfinv22(uup)*ftfinv23(uup) + ftfinv23(uup)*ftfinv22(uup)) ) //
+macro etan2231(mat,uup) ( mat[0]*ftfinv22(uup)*ftfinv31(uup) - ela(mat,uup)
+          * (ftfinv23(uup)*ftfinv21(uup) + ftfinv21(uup)*ftfinv23(uup)) ) //
+macro etan2232(mat,uup) ( mat[0]*ftfinv22(uup)*ftfinv32(uup) - ela(mat,uup)
+          * (ftfinv23(uup)*ftfinv22(uup) + ftfinv22(uup)*ftfinv23(uup)) ) //
+macro etan2233(mat,uup) ( mat[0]*ftfinv22(uup)*ftfinv33(uup) - ela(mat,uup)
+          * (ftfinv23(uup)*ftfinv23(uup) + ftfinv23(uup)*ftfinv23(uup)) ) //
+
+macro etan2311(mat,uup) ( mat[0]*ftfinv23(uup)*ftfinv11(uup) - ela(mat,uup)
+          * (ftfinv21(uup)*ftfinv31(uup) + ftfinv21(uup)*ftfinv31(uup)) ) //
+macro etan2312(mat,uup) ( mat[0]*ftfinv23(uup)*ftfinv12(uup) - ela(mat,uup)
+          * (ftfinv21(uup)*ftfinv32(uup) + ftfinv22(uup)*ftfinv31(uup)) ) //
+macro etan2313(mat,uup) ( mat[0]*ftfinv23(uup)*ftfinv13(uup) - ela(mat,uup)
+          * (ftfinv21(uup)*ftfinv33(uup) + ftfinv23(uup)*ftfinv31(uup)) ) //
+macro etan2321(mat,uup) ( mat[0]*ftfinv23(uup)*ftfinv21(uup) - ela(mat,uup)
+          * (ftfinv22(uup)*ftfinv31(uup) + ftfinv21(uup)*ftfinv32(uup)) ) //
+macro etan2322(mat,uup) ( mat[0]*ftfinv23(uup)*ftfinv22(uup) - ela(mat,uup)
+          * (ftfinv22(uup)*ftfinv32(uup) + ftfinv22(uup)*ftfinv32(uup)) ) //
+macro etan2323(mat,uup) ( mat[0]*ftfinv23(uup)*ftfinv23(uup) - ela(mat,uup)
+          * (ftfinv22(uup)*ftfinv33(uup) + ftfinv23(uup)*ftfinv32(uup)) ) //
+macro etan2331(mat,uup) ( mat[0]*ftfinv23(uup)*ftfinv31(uup) - ela(mat,uup)
+          * (ftfinv23(uup)*ftfinv31(uup) + ftfinv21(uup)*ftfinv33(uup)) ) //
+macro etan2332(mat,uup) ( mat[0]*ftfinv23(uup)*ftfinv32(uup) - ela(mat,uup)
+          * (ftfinv23(uup)*ftfinv32(uup) + ftfinv22(uup)*ftfinv33(uup)) ) //
+macro etan2333(mat,uup) ( mat[0]*ftfinv23(uup)*ftfinv33(uup) - ela(mat,uup)
+          * (ftfinv23(uup)*ftfinv33(uup) + ftfinv23(uup)*ftfinv33(uup)) ) //
+
+macro etan3111(mat,uup) ( mat[0]*ftfinv31(uup)*ftfinv11(uup) - ela(mat,uup)
+          * (ftfinv31(uup)*ftfinv11(uup) + ftfinv31(uup)*ftfinv11(uup)) ) //
+macro etan3112(mat,uup) ( mat[0]*ftfinv31(uup)*ftfinv12(uup) - ela(mat,uup)
+          * (ftfinv31(uup)*ftfinv12(uup) + ftfinv32(uup)*ftfinv11(uup)) ) //
+macro etan3113(mat,uup) ( mat[0]*ftfinv31(uup)*ftfinv13(uup) - ela(mat,uup)
+          * (ftfinv31(uup)*ftfinv13(uup) + ftfinv33(uup)*ftfinv11(uup)) ) //
+macro etan3121(mat,uup) ( mat[0]*ftfinv31(uup)*ftfinv21(uup) - ela(mat,uup)
+          * (ftfinv32(uup)*ftfinv11(uup) + ftfinv31(uup)*ftfinv12(uup)) ) //
+macro etan3122(mat,uup) ( mat[0]*ftfinv31(uup)*ftfinv22(uup) - ela(mat,uup)
+          * (ftfinv32(uup)*ftfinv12(uup) + ftfinv32(uup)*ftfinv12(uup)) ) //
+macro etan3123(mat,uup) ( mat[0]*ftfinv31(uup)*ftfinv23(uup) - ela(mat,uup)
+          * (ftfinv32(uup)*ftfinv13(uup) + ftfinv33(uup)*ftfinv12(uup)) ) //
+macro etan3131(mat,uup) ( mat[0]*ftfinv31(uup)*ftfinv31(uup) - ela(mat,uup)
+          * (ftfinv33(uup)*ftfinv11(uup) + ftfinv31(uup)*ftfinv13(uup)) ) //
+macro etan3132(mat,uup) ( mat[0]*ftfinv31(uup)*ftfinv32(uup) - ela(mat,uup)
+          * (ftfinv33(uup)*ftfinv12(uup) + ftfinv32(uup)*ftfinv13(uup)) ) //
+macro etan3133(mat,uup) ( mat[0]*ftfinv31(uup)*ftfinv33(uup) - ela(mat,uup)
+          * (ftfinv33(uup)*ftfinv13(uup) + ftfinv33(uup)*ftfinv13(uup)) ) //
+
+macro etan3211(mat,uup) ( mat[0]*ftfinv32(uup)*ftfinv11(uup) - ela(mat,uup)
+          * (ftfinv31(uup)*ftfinv21(uup) + ftfinv31(uup)*ftfinv21(uup)) ) //
+macro etan3212(mat,uup) ( mat[0]*ftfinv32(uup)*ftfinv12(uup) - ela(mat,uup)
+          * (ftfinv31(uup)*ftfinv22(uup) + ftfinv32(uup)*ftfinv21(uup)) ) //
+macro etan3213(mat,uup) ( mat[0]*ftfinv32(uup)*ftfinv13(uup) - ela(mat,uup)
+          * (ftfinv31(uup)*ftfinv23(uup) + ftfinv33(uup)*ftfinv21(uup)) ) //
+macro etan3221(mat,uup) ( mat[0]*ftfinv32(uup)*ftfinv21(uup) - ela(mat,uup)
+          * (ftfinv32(uup)*ftfinv21(uup) + ftfinv31(uup)*ftfinv22(uup)) ) //
+macro etan3222(mat,uup) ( mat[0]*ftfinv32(uup)*ftfinv22(uup) - ela(mat,uup)
+          * (ftfinv32(uup)*ftfinv22(uup) + ftfinv32(uup)*ftfinv22(uup)) ) //
+macro etan3223(mat,uup) ( mat[0]*ftfinv32(uup)*ftfinv23(uup) - ela(mat,uup)
+          * (ftfinv32(uup)*ftfinv23(uup) + ftfinv33(uup)*ftfinv22(uup)) ) //
+macro etan3231(mat,uup) ( mat[0]*ftfinv32(uup)*ftfinv31(uup) - ela(mat,uup)
+          * (ftfinv33(uup)*ftfinv21(uup) + ftfinv31(uup)*ftfinv23(uup)) ) //
+macro etan3232(mat,uup) ( mat[0]*ftfinv32(uup)*ftfinv32(uup) - ela(mat,uup)
+          * (ftfinv33(uup)*ftfinv22(uup) + ftfinv32(uup)*ftfinv23(uup)) ) //
+macro etan3233(mat,uup) ( mat[0]*ftfinv32(uup)*ftfinv33(uup) - ela(mat,uup)
+          * (ftfinv33(uup)*ftfinv23(uup) + ftfinv33(uup)*ftfinv23(uup)) ) //
+
+macro etan3311(mat,uup) ( mat[0]*ftfinv33(uup)*ftfinv11(uup) - ela(mat,uup)
+          * (ftfinv31(uup)*ftfinv31(uup) + ftfinv31(uup)*ftfinv31(uup)) ) //
+macro etan3312(mat,uup) ( mat[0]*ftfinv33(uup)*ftfinv12(uup) - ela(mat,uup)
+          * (ftfinv31(uup)*ftfinv32(uup) + ftfinv32(uup)*ftfinv31(uup)) ) //
+macro etan3313(mat,uup) ( mat[0]*ftfinv33(uup)*ftfinv13(uup) - ela(mat,uup)
+          * (ftfinv31(uup)*ftfinv33(uup) + ftfinv33(uup)*ftfinv31(uup)) ) //
+macro etan3321(mat,uup) ( mat[0]*ftfinv33(uup)*ftfinv21(uup) - ela(mat,uup)
+          * (ftfinv32(uup)*ftfinv31(uup) + ftfinv31(uup)*ftfinv32(uup)) ) //
+macro etan3322(mat,uup) ( mat[0]*ftfinv33(uup)*ftfinv22(uup) - ela(mat,uup)
+          * (ftfinv32(uup)*ftfinv32(uup) + ftfinv32(uup)*ftfinv32(uup)) ) //
+macro etan3323(mat,uup) ( mat[0]*ftfinv33(uup)*ftfinv23(uup) - ela(mat,uup)
+          * (ftfinv32(uup)*ftfinv33(uup) + ftfinv33(uup)*ftfinv32(uup)) ) //
+macro etan3331(mat,uup) ( mat[0]*ftfinv33(uup)*ftfinv31(uup) - ela(mat,uup)
+          * (ftfinv33(uup)*ftfinv31(uup) + ftfinv31(uup)*ftfinv33(uup)) ) //
+macro etan3332(mat,uup) ( mat[0]*ftfinv33(uup)*ftfinv32(uup) - ela(mat,uup)
+          * (ftfinv33(uup)*ftfinv32(uup) + ftfinv32(uup)*ftfinv33(uup)) ) //
+macro etan3333(mat,uup) ( mat[0]*ftfinv33(uup)*ftfinv33(uup) - ela(mat,uup)
+          * (ftfinv33(uup)*ftfinv33(uup) + ftfinv33(uup)*ftfinv33(uup)) ) //
+
+// To be checked
+macro petan1111(mat,uup) ( F11(uup)*etan1111(mat,uup) + F12(uup)*etan2111(mat,uup) + F13(uup)*etan3111(mat,uup) ) //
+macro petan1112(mat,uup) ( F11(uup)*etan1112(mat,uup) + F12(uup)*etan2112(mat,uup) + F13(uup)*etan3112(mat,uup) ) //
+macro petan1113(mat,uup) ( F11(uup)*etan1113(mat,uup) + F12(uup)*etan2113(mat,uup) + F13(uup)*etan3113(mat,uup) ) //
+macro petan1121(mat,uup) ( F11(uup)*etan1121(mat,uup) + F12(uup)*etan2121(mat,uup) + F13(uup)*etan3121(mat,uup) ) //
+macro petan1122(mat,uup) ( F11(uup)*etan1122(mat,uup) + F12(uup)*etan2122(mat,uup) + F13(uup)*etan3122(mat,uup) ) //
+macro petan1123(mat,uup) ( F11(uup)*etan1123(mat,uup) + F12(uup)*etan2123(mat,uup) + F13(uup)*etan3123(mat,uup) ) //
+macro petan1131(mat,uup) ( F11(uup)*etan1131(mat,uup) + F12(uup)*etan2131(mat,uup) + F13(uup)*etan3131(mat,uup) ) //
+macro petan1132(mat,uup) ( F11(uup)*etan1132(mat,uup) + F12(uup)*etan2132(mat,uup) + F13(uup)*etan3132(mat,uup) ) //
+macro petan1133(mat,uup) ( F11(uup)*etan1133(mat,uup) + F12(uup)*etan2133(mat,uup) + F13(uup)*etan3133(mat,uup) ) //
+
+macro petan1211(mat,uup) ( F11(uup)*etan1211(mat,uup) + F12(uup)*etan2211(mat,uup) + F13(uup)*etan3211(mat,uup) ) //
+macro petan1212(mat,uup) ( F11(uup)*etan1212(mat,uup) + F12(uup)*etan2212(mat,uup) + F13(uup)*etan3212(mat,uup) ) //
+macro petan1213(mat,uup) ( F11(uup)*etan1213(mat,uup) + F12(uup)*etan2213(mat,uup) + F13(uup)*etan3213(mat,uup) ) //
+macro petan1221(mat,uup) ( F11(uup)*etan1221(mat,uup) + F12(uup)*etan2221(mat,uup) + F13(uup)*etan3221(mat,uup) ) //
+macro petan1222(mat,uup) ( F11(uup)*etan1222(mat,uup) + F12(uup)*etan2222(mat,uup) + F13(uup)*etan3222(mat,uup) ) //
+macro petan1223(mat,uup) ( F11(uup)*etan1223(mat,uup) + F12(uup)*etan2223(mat,uup) + F13(uup)*etan3223(mat,uup) ) //
+macro petan1231(mat,uup) ( F11(uup)*etan1231(mat,uup) + F12(uup)*etan2231(mat,uup) + F13(uup)*etan3231(mat,uup) ) //
+macro petan1232(mat,uup) ( F11(uup)*etan1232(mat,uup) + F12(uup)*etan2232(mat,uup) + F13(uup)*etan3232(mat,uup) ) //
+macro petan1233(mat,uup) ( F11(uup)*etan1233(mat,uup) + F12(uup)*etan2233(mat,uup) + F13(uup)*etan3233(mat,uup) ) //
+
+macro petan1311(mat,uup) ( F11(uup)*etan1311(mat,uup) + F12(uup)*etan2311(mat,uup) + F13(uup)*etan3311(mat,uup) ) //
+macro petan1312(mat,uup) ( F11(uup)*etan1312(mat,uup) + F12(uup)*etan2312(mat,uup) + F13(uup)*etan3312(mat,uup) ) //
+macro petan1313(mat,uup) ( F11(uup)*etan1313(mat,uup) + F12(uup)*etan2313(mat,uup) + F13(uup)*etan3313(mat,uup) ) //
+macro petan1321(mat,uup) ( F11(uup)*etan1321(mat,uup) + F12(uup)*etan2321(mat,uup) + F13(uup)*etan3321(mat,uup) ) //
+macro petan1322(mat,uup) ( F11(uup)*etan1322(mat,uup) + F12(uup)*etan2322(mat,uup) + F13(uup)*etan3322(mat,uup) ) //
+macro petan1323(mat,uup) ( F11(uup)*etan1323(mat,uup) + F12(uup)*etan2323(mat,uup) + F13(uup)*etan3323(mat,uup) ) //
+macro petan1331(mat,uup) ( F11(uup)*etan1331(mat,uup) + F12(uup)*etan2331(mat,uup) + F13(uup)*etan3331(mat,uup) ) //
+macro petan1332(mat,uup) ( F11(uup)*etan1332(mat,uup) + F12(uup)*etan2332(mat,uup) + F13(uup)*etan3332(mat,uup) ) //
+macro petan1333(mat,uup) ( F11(uup)*etan1333(mat,uup) + F12(uup)*etan2333(mat,uup) + F13(uup)*etan3333(mat,uup) ) //
+
+macro petan2111(mat,uup) ( F21(uup)*etan1111(mat,uup) + F22(uup)*etan2111(mat,uup) + F23(uup)*etan3111(mat,uup) ) //
+macro petan2112(mat,uup) ( F21(uup)*etan1112(mat,uup) + F22(uup)*etan2112(mat,uup) + F23(uup)*etan3112(mat,uup) ) //
+macro petan2113(mat,uup) ( F21(uup)*etan1113(mat,uup) + F22(uup)*etan2113(mat,uup) + F23(uup)*etan3113(mat,uup) ) //
+macro petan2121(mat,uup) ( F21(uup)*etan1121(mat,uup) + F22(uup)*etan2121(mat,uup) + F23(uup)*etan3121(mat,uup) ) //
+macro petan2122(mat,uup) ( F21(uup)*etan1122(mat,uup) + F22(uup)*etan2122(mat,uup) + F23(uup)*etan3122(mat,uup) ) //
+macro petan2123(mat,uup) ( F21(uup)*etan1123(mat,uup) + F22(uup)*etan2123(mat,uup) + F23(uup)*etan3123(mat,uup) ) //
+macro petan2131(mat,uup) ( F21(uup)*etan1131(mat,uup) + F22(uup)*etan2131(mat,uup) + F23(uup)*etan3131(mat,uup) ) //
+macro petan2132(mat,uup) ( F21(uup)*etan1132(mat,uup) + F22(uup)*etan2132(mat,uup) + F23(uup)*etan3132(mat,uup) ) //
+macro petan2133(mat,uup) ( F21(uup)*etan1133(mat,uup) + F22(uup)*etan2133(mat,uup) + F23(uup)*etan3133(mat,uup) ) //
+
+macro petan2211(mat,uup) ( F21(uup)*etan1211(mat,uup) + F22(uup)*etan2211(mat,uup) + F23(uup)*etan3211(mat,uup) ) //
+macro petan2212(mat,uup) ( F21(uup)*etan1212(mat,uup) + F22(uup)*etan2212(mat,uup) + F23(uup)*etan3212(mat,uup) ) //
+macro petan2213(mat,uup) ( F21(uup)*etan1213(mat,uup) + F22(uup)*etan2213(mat,uup) + F23(uup)*etan3213(mat,uup) ) //
+macro petan2221(mat,uup) ( F21(uup)*etan1221(mat,uup) + F22(uup)*etan2221(mat,uup) + F23(uup)*etan3221(mat,uup) ) //
+macro petan2222(mat,uup) ( F21(uup)*etan1222(mat,uup) + F22(uup)*etan2222(mat,uup) + F23(uup)*etan3222(mat,uup) ) //
+macro petan2223(mat,uup) ( F21(uup)*etan1223(mat,uup) + F22(uup)*etan2223(mat,uup) + F23(uup)*etan3223(mat,uup) ) //
+macro petan2231(mat,uup) ( F21(uup)*etan1231(mat,uup) + F22(uup)*etan2231(mat,uup) + F23(uup)*etan3231(mat,uup) ) //
+macro petan2232(mat,uup) ( F21(uup)*etan1232(mat,uup) + F22(uup)*etan2232(mat,uup) + F23(uup)*etan3232(mat,uup) ) //
+macro petan2233(mat,uup) ( F21(uup)*etan1233(mat,uup) + F22(uup)*etan2233(mat,uup) + F23(uup)*etan3233(mat,uup) ) //
+
+macro petan2311(mat,uup) ( F21(uup)*etan1311(mat,uup) + F22(uup)*etan2311(mat,uup) + F23(uup)*etan3311(mat,uup) ) //
+macro petan2312(mat,uup) ( F21(uup)*etan1312(mat,uup) + F22(uup)*etan2312(mat,uup) + F23(uup)*etan3312(mat,uup) ) //
+macro petan2313(mat,uup) ( F21(uup)*etan1313(mat,uup) + F22(uup)*etan2313(mat,uup) + F23(uup)*etan3313(mat,uup) ) //
+macro petan2321(mat,uup) ( F21(uup)*etan1321(mat,uup) + F22(uup)*etan2321(mat,uup) + F23(uup)*etan3321(mat,uup) ) //
+macro petan2322(mat,uup) ( F21(uup)*etan1322(mat,uup) + F22(uup)*etan2322(mat,uup) + F23(uup)*etan3322(mat,uup) ) //
+macro petan2323(mat,uup) ( F21(uup)*etan1323(mat,uup) + F22(uup)*etan2323(mat,uup) + F23(uup)*etan3323(mat,uup) ) //
+macro petan2331(mat,uup) ( F21(uup)*etan1331(mat,uup) + F22(uup)*etan2331(mat,uup) + F23(uup)*etan3331(mat,uup) ) //
+macro petan2332(mat,uup) ( F21(uup)*etan1332(mat,uup) + F22(uup)*etan2332(mat,uup) + F23(uup)*etan3332(mat,uup) ) //
+macro petan2333(mat,uup) ( F21(uup)*etan1333(mat,uup) + F22(uup)*etan2333(mat,uup) + F23(uup)*etan3333(mat,uup) ) //
+
+macro petan3111(mat,uup) ( F31(uup)*etan1111(mat,uup) + F32(uup)*etan2111(mat,uup) + F33(uup)*etan3111(mat,uup) ) //
+macro petan3112(mat,uup) ( F31(uup)*etan1112(mat,uup) + F32(uup)*etan2112(mat,uup) + F33(uup)*etan3112(mat,uup) ) //
+macro petan3113(mat,uup) ( F31(uup)*etan1113(mat,uup) + F32(uup)*etan2113(mat,uup) + F33(uup)*etan3113(mat,uup) ) //
+macro petan3121(mat,uup) ( F31(uup)*etan1121(mat,uup) + F32(uup)*etan2121(mat,uup) + F33(uup)*etan3121(mat,uup) ) //
+macro petan3122(mat,uup) ( F31(uup)*etan1122(mat,uup) + F32(uup)*etan2122(mat,uup) + F33(uup)*etan3122(mat,uup) ) //
+macro petan3123(mat,uup) ( F31(uup)*etan1123(mat,uup) + F32(uup)*etan2123(mat,uup) + F33(uup)*etan3123(mat,uup) ) //
+macro petan3131(mat,uup) ( F31(uup)*etan1131(mat,uup) + F32(uup)*etan2131(mat,uup) + F33(uup)*etan3131(mat,uup) ) //
+macro petan3132(mat,uup) ( F31(uup)*etan1132(mat,uup) + F32(uup)*etan2132(mat,uup) + F33(uup)*etan3132(mat,uup) ) //
+macro petan3133(mat,uup) ( F31(uup)*etan1133(mat,uup) + F32(uup)*etan2133(mat,uup) + F33(uup)*etan3133(mat,uup) ) //
+
+macro petan3211(mat,uup) ( F31(uup)*etan1211(mat,uup) + F32(uup)*etan2211(mat,uup) + F33(uup)*etan3211(mat,uup) ) //
+macro petan3212(mat,uup) ( F31(uup)*etan1212(mat,uup) + F32(uup)*etan2212(mat,uup) + F33(uup)*etan3212(mat,uup) ) //
+macro petan3213(mat,uup) ( F31(uup)*etan1213(mat,uup) + F32(uup)*etan2213(mat,uup) + F33(uup)*etan3213(mat,uup) ) //
+macro petan3221(mat,uup) ( F31(uup)*etan1221(mat,uup) + F32(uup)*etan2221(mat,uup) + F33(uup)*etan3221(mat,uup) ) //
+macro petan3222(mat,uup) ( F31(uup)*etan1222(mat,uup) + F32(uup)*etan2222(mat,uup) + F33(uup)*etan3222(mat,uup) ) //
+macro petan3223(mat,uup) ( F31(uup)*etan1223(mat,uup) + F32(uup)*etan2223(mat,uup) + F33(uup)*etan3223(mat,uup) ) //
+macro petan3231(mat,uup) ( F31(uup)*etan1231(mat,uup) + F32(uup)*etan2231(mat,uup) + F33(uup)*etan3231(mat,uup) ) //
+macro petan3232(mat,uup) ( F31(uup)*etan1232(mat,uup) + F32(uup)*etan2232(mat,uup) + F33(uup)*etan3232(mat,uup) ) //
+macro petan3233(mat,uup) ( F31(uup)*etan1233(mat,uup) + F32(uup)*etan2233(mat,uup) + F33(uup)*etan3233(mat,uup) ) //
+
+macro petan3311(mat,uup) ( F31(uup)*etan1311(mat,uup) + F32(uup)*etan2311(mat,uup) + F33(uup)*etan3311(mat,uup) ) //
+macro petan3312(mat,uup) ( F31(uup)*etan1312(mat,uup) + F32(uup)*etan2312(mat,uup) + F33(uup)*etan3312(mat,uup) ) //
+macro petan3313(mat,uup) ( F31(uup)*etan1313(mat,uup) + F32(uup)*etan2313(mat,uup) + F33(uup)*etan3313(mat,uup) ) //
+macro petan3321(mat,uup) ( F31(uup)*etan1321(mat,uup) + F32(uup)*etan2321(mat,uup) + F33(uup)*etan3321(mat,uup) ) //
+macro petan3322(mat,uup) ( F31(uup)*etan1322(mat,uup) + F32(uup)*etan2322(mat,uup) + F33(uup)*etan3322(mat,uup) ) //
+macro petan3323(mat,uup) ( F31(uup)*etan1323(mat,uup) + F32(uup)*etan2323(mat,uup) + F33(uup)*etan3323(mat,uup) ) //
+macro petan3331(mat,uup) ( F31(uup)*etan1331(mat,uup) + F32(uup)*etan2331(mat,uup) + F33(uup)*etan3331(mat,uup) ) //
+macro petan3332(mat,uup) ( F31(uup)*etan1332(mat,uup) + F32(uup)*etan2332(mat,uup) + F33(uup)*etan3332(mat,uup) ) //
+macro petan3333(mat,uup) ( F31(uup)*etan1333(mat,uup) + F32(uup)*etan2333(mat,uup) + F33(uup)*etan3333(mat,uup) ) //
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+// 1st Piola-Kirchhoff stress @ two-point
+macro psts11(mat,uup) ( F11(uup) * sts11(mat,uup) + F12(uup) * sts21(mat,uup) + F13(uup) * sts31(mat,uup) )//
+macro psts12(mat,uup) ( F11(uup) * sts12(mat,uup) + F12(uup) * sts22(mat,uup) + F13(uup) * sts32(mat,uup) )//
+macro psts13(mat,uup) ( F11(uup) * sts13(mat,uup) + F12(uup) * sts23(mat,uup) + F13(uup) * sts33(mat,uup) )//
+macro psts21(mat,uup) ( F21(uup) * sts11(mat,uup) + F22(uup) * sts21(mat,uup) + F23(uup) * sts31(mat,uup) )//
+macro psts22(mat,uup) ( F21(uup) * sts12(mat,uup) + F22(uup) * sts22(mat,uup) + F23(uup) * sts32(mat,uup) )//
+macro psts23(mat,uup) ( F21(uup) * sts13(mat,uup) + F22(uup) * sts23(mat,uup) + F23(uup) * sts33(mat,uup) )//
+macro psts31(mat,uup) ( F31(uup) * sts11(mat,uup) + F32(uup) * sts21(mat,uup) + F33(uup) * sts31(mat,uup) )//
+macro psts32(mat,uup) ( F31(uup) * sts12(mat,uup) + F32(uup) * sts22(mat,uup) + F33(uup) * sts32(mat,uup) )//
+macro psts33(mat,uup) ( F31(uup) * sts13(mat,uup) + F32(uup) * sts23(mat,uup) + F33(uup) * sts33(mat,uup) )//
+
+// symdu = sym(grad(uup)) @ reference
+macro sdu11 (uup, vv) ( dudx11(vv)*F11(uup) + dudx21(vv)*F21(uup) + dudx31(vv)*F31(uup) ) //
+macro sdu12 (uup, vv) ( 0.5*( dudx11(vv)*F12(uup) + dudx21(vv)*F22(uup) + dudx31(vv)*F32(uup)
+                         + dudx12(vv)*F11(uup) + dudx22(vv)*F21(uup) + dudx32(vv)*F31(uup) ) ) //
+macro sdu13 (uup, vv) ( 0.5*( dudx11(vv)*F13(uup) + dudx21(vv)*F23(uup) + dudx31(vv)*F33(uup)
+                         + dudx13(vv)*F11(uup) + dudx23(vv)*F21(uup) + dudx33(vv)*F31(uup) ) ) //
+macro sdu21 (uup, vv) ( sdu12(uup,vv) ) //
+macro sdu22 (uup, vv) ( dudx12(vv)*F12(uup) + dudx22(vv)*F22(uup) + dudx32(vv)*F32(uup) ) //
+macro sdu23 (uup, vv) ( 0.5*( dudx12(vv)*F13(uup) + dudx22(vv)*F23(uup) + dudx32(vv)*F33(uup)
+                         + dudx13(vv)*F12(uup) + dudx23(vv)*F22(uup) + dudx33(vv)*F32(uup) ) ) //
+macro sdu31 (uup, vv) ( sdu13(uup,vv) ) //
+macro sdu32 (uup, vv) ( sdu23(uup,vv) ) //
+macro sdu33 (uup, vv) ( dudx13(vv)*F13(uup) + dudx23(vv)*F23(uup) + dudx33(vv)*F33(uup) ) //
+
+// amat = grad(uup)*sts @ two-point
+macro amat11(mat,uup,vv) ( dudx11(vv)*sts11(mat,uup) + dudx12(vv)*sts21(mat,uup) + dudx13(vv)*sts31(mat,uup) ) //
+macro amat12(mat,uup,vv) ( dudx11(vv)*sts12(mat,uup) + dudx12(vv)*sts22(mat,uup) + dudx13(vv)*sts32(mat,uup) ) //
+macro amat13(mat,uup,vv) ( dudx11(vv)*sts13(mat,uup) + dudx12(vv)*sts23(mat,uup) + dudx13(vv)*sts33(mat,uup) ) //
+macro amat21(mat,uup,vv) ( dudx21(vv)*sts11(mat,uup) + dudx22(vv)*sts21(mat,uup) + dudx23(vv)*sts31(mat,uup) ) //
+macro amat22(mat,uup,vv) ( dudx21(vv)*sts12(mat,uup) + dudx22(vv)*sts22(mat,uup) + dudx23(vv)*sts32(mat,uup) ) //
+macro amat23(mat,uup,vv) ( dudx21(vv)*sts13(mat,uup) + dudx22(vv)*sts23(mat,uup) + dudx23(vv)*sts33(mat,uup) ) //
+macro amat31(mat,uup,vv) ( dudx31(vv)*sts11(mat,uup) + dudx32(vv)*sts21(mat,uup) + dudx33(vv)*sts31(mat,uup) ) //
+macro amat32(mat,uup,vv) ( dudx31(vv)*sts12(mat,uup) + dudx32(vv)*sts22(mat,uup) + dudx33(vv)*sts32(mat,uup) ) //
+macro amat33(mat,uup,vv) ( dudx31(vv)*sts13(mat,uup) + dudx32(vv)*sts23(mat,uup) + dudx33(vv)*sts33(mat,uup) ) //
+
+// bmat = petan:symdu @ two-point
+macro bmat11(mat,uup, vv) (
+       petan1111(mat,uup)*sdu11(uup, vv) +  petan1112(mat,uup)*sdu12(uup, vv) +  petan1113(mat,uup)*sdu13(uup, vv)
+     + petan1121(mat,uup)*sdu21(uup, vv) +  petan1122(mat,uup)*sdu22(uup, vv) +  petan1123(mat,uup)*sdu23(uup, vv)  
+     + petan1131(mat,uup)*sdu31(uup, vv) +  petan1132(mat,uup)*sdu32(uup, vv) +  petan1133(mat,uup)*sdu33(uup, vv) ) //
+macro bmat12(mat,uup, vv) (
+       petan1211(mat,uup)*sdu11(uup, vv) +  petan1212(mat,uup)*sdu12(uup, vv) +  petan1213(mat,uup)*sdu13(uup, vv)
+     + petan1221(mat,uup)*sdu21(uup, vv) +  petan1222(mat,uup)*sdu22(uup, vv) +  petan1223(mat,uup)*sdu23(uup, vv)
+     + petan1231(mat,uup)*sdu31(uup, vv) +  petan1232(mat,uup)*sdu32(uup, vv) +  petan1233(mat,uup)*sdu33(uup, vv) ) //
+macro bmat13(mat,uup, vv) (
+       petan1311(mat,uup)*sdu11(uup, vv) +  petan1312(mat,uup)*sdu12(uup, vv) +  petan1313(mat,uup)*sdu13(uup, vv)
+     + petan1321(mat,uup)*sdu21(uup, vv) +  petan1322(mat,uup)*sdu22(uup, vv) +  petan1323(mat,uup)*sdu23(uup, vv)
+     + petan1331(mat,uup)*sdu31(uup, vv) +  petan1332(mat,uup)*sdu32(uup, vv) +  petan1333(mat,uup)*sdu33(uup, vv) ) //
+macro bmat21(mat,uup, vv) (
+       petan2111(mat,uup)*sdu11(uup, vv) +  petan2112(mat,uup)*sdu12(uup, vv) +  petan2113(mat,uup)*sdu13(uup, vv)
+     + petan2121(mat,uup)*sdu21(uup, vv) +  petan2122(mat,uup)*sdu22(uup, vv) +  petan2123(mat,uup)*sdu23(uup, vv)  
+     + petan2131(mat,uup)*sdu31(uup, vv) +  petan2132(mat,uup)*sdu32(uup, vv) +  petan2133(mat,uup)*sdu33(uup, vv) ) //
+macro bmat22(mat,uup, vv) (
+       petan2211(mat,uup)*sdu11(uup, vv) +  petan2212(mat,uup)*sdu12(uup, vv) +  petan2213(mat,uup)*sdu13(uup, vv)
+     + petan2221(mat,uup)*sdu21(uup, vv) +  petan2222(mat,uup)*sdu22(uup, vv) +  petan2223(mat,uup)*sdu23(uup, vv)
+     + petan2231(mat,uup)*sdu31(uup, vv) +  petan2232(mat,uup)*sdu32(uup, vv) +  petan2233(mat,uup)*sdu33(uup, vv) ) //
+macro bmat23(mat,uup, vv) (
+       petan2311(mat,uup)*sdu11(uup, vv) +  petan2312(mat,uup)*sdu12(uup, vv) +  petan2313(mat,uup)*sdu13(uup, vv)
+     + petan2321(mat,uup)*sdu21(uup, vv) +  petan2322(mat,uup)*sdu22(uup, vv) +  petan2323(mat,uup)*sdu23(uup, vv)
+     + petan2331(mat,uup)*sdu31(uup, vv) +  petan2332(mat,uup)*sdu32(uup, vv) +  petan2333(mat,uup)*sdu33(uup, vv) ) //
+macro bmat31(mat,uup, vv) (
+       petan3111(mat,uup)*sdu11(uup, vv) +  petan3112(mat,uup)*sdu12(uup, vv) +  petan3113(mat,uup)*sdu13(uup, vv)
+     + petan3121(mat,uup)*sdu21(uup, vv) +  petan3122(mat,uup)*sdu22(uup, vv) +  petan3123(mat,uup)*sdu23(uup, vv)  
+     + petan3131(mat,uup)*sdu31(uup, vv) +  petan3132(mat,uup)*sdu32(uup, vv) +  petan3133(mat,uup)*sdu33(uup, vv) ) //
+macro bmat32(mat,uup, vv) (
+       petan3211(mat,uup)*sdu11(uup, vv) +  petan3212(mat,uup)*sdu12(uup, vv) +  petan3213(mat,uup)*sdu13(uup, vv)
+     + petan3221(mat,uup)*sdu21(uup, vv) +  petan3222(mat,uup)*sdu22(uup, vv) +  petan3223(mat,uup)*sdu23(uup, vv)
+     + petan3231(mat,uup)*sdu31(uup, vv) +  petan3232(mat,uup)*sdu32(uup, vv) +  petan3233(mat,uup)*sdu33(uup, vv) ) //
+macro bmat33(mat,uup, vv) (
+       petan3311(mat,uup)*sdu11(uup, vv) +  petan3312(mat,uup)*sdu12(uup, vv) +  petan3313(mat,uup)*sdu13(uup, vv)
+     + petan3321(mat,uup)*sdu21(uup, vv) +  petan3322(mat,uup)*sdu22(uup, vv) +  petan3323(mat,uup)*sdu23(uup, vv)
+     + petan3331(mat,uup)*sdu31(uup, vv) +  petan3332(mat,uup)*sdu32(uup, vv) +  petan3333(mat,uup)*sdu33(uup, vv) ) //
+
+
+/////////////////////////////////////////////////////
+/////////////////////////////////////////////////////

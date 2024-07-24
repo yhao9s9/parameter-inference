@@ -109,7 +109,7 @@ for t in range(timestep):
     check_sample = np.squeeze(np.random.uniform(0,1,1))
 
     print('Accept ratio: ',accept_ratio)
-    if 1 <= accept_ratio:
+    if check_sample <= accept_ratio:
         proposed_sample_current = proposed_sample_new
         posterior_list.append(proposed_sample_current)
         likelihood_lower = likelihood_upper

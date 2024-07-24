@@ -62,9 +62,10 @@ def compare_mesh(mesh1_dir,mesh2_dir,num_block,point_cor):
         p1 = pcu.load_mesh_v("mesh1.ply")
         p2 = pcu.load_mesh_v("mesh2.ply")
 
-        # Compute the chamfer distance between p1 and p2
-        err = pcu.hausdorff_distance(p1, p2)
-    return err*1000
+        ### Compute the chamfer distance between p1 and p2
+        ### https://www.fwilliams.info/point-cloud-utils/sections/shape_metrics/
+        err = pcu.chamfer_distance(p1, p2) 
+    return err
 
 num_core = 128
 prior_mean = 5000
@@ -92,6 +93,7 @@ for t in range(timestep):
     print('Timestep:',t)
     ### Important! The workflow below this is now univaraite!!! output [sample_size->1,num_vague]
     proposed_sample_new = np.random.normal(proposed_sample_current,assumption_variance,1)
+    print('Guess mu: ', proposed_sample_new)
 
     np.savetxt("muguess.txt",[proposed_sample_new])
     os.system("/home/yuehao/freefem/bin/ff-mpirun -np "+str(num_core)+" fsi.edp -v 0 ")
@@ -100,13 +102,14 @@ for t in range(timestep):
     print('Difference: ',difference_new)
     if difference_new <= difference_old:
         proposed_sample_current = proposed_sample_new
-        posterior_list.append(proposed_sample_current)
+        posterior_list.append(proposed_sample_current.item())
         difference_old = difference_new
         difference_list.append(difference_old)
         print('Accept sample: ',proposed_sample_current)
         print(posterior_list)
         print(difference_list)
     else:
+        print('Not accept')
         pass
         # print('Accept ratio: ',accept_ratio,'; Xnew: ',x_new,'; Reject')
     
